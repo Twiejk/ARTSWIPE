@@ -11,6 +11,8 @@
 <link rel="preconnect" href="https://api.openverse.org">
 <link rel="preconnect" href="https://commons.wikimedia.org">
 <link rel="preconnect" href="https://upload.wikimedia.org">
+<link rel="preconnect" href="https://www.wikidata.org">
+<link rel="preconnect" href="https://api.datamuse.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one full-height stage, card stack in the middle, thumb-reach controls at the bottom */
@@ -227,11 +229,57 @@ let feed = null;
 function makeFeed(topic){
   const coll = ensureColl(topic);
   const seen = new Set([...coll.seen]);
-  const queries = [topic, ...settings.mods.map(m => `${topic} ${m}`)];
-  // one cursor per (source, query); round-robin across them
-  const cursors = [];
-  for(const s of activeSources()) for(const q of queries) cursors.push({s, q, page:1, done:false, busy:false});
-  return { topic, coll, seen, cursors, ci:0, pending:[], ready:[], loading:0, dead:false, errors:0 };
+  const f = { topic, coll, seen, cursors:[], queries:new Set(), extra:[], ci:0, pending:[], ready:[], loading:0, dead:false, errors:0, expanding:true };
+  addQueries(f, [topic, ...settings.mods.map(m => `${topic} ${m}`)]);
+  expand(f).catch(console.warn).finally(() => { f.expanding = false; if(feed === f){ pump(); render(); } }); // translation + related terms arrive in the background
+  return f;
+}
+// one cursor per (source, query); round-robin across them
+function addQueries(f, qs, front){
+  const add = [];
+  for(const q of qs){ const k = q.toLowerCase().trim(); if(!k || f.queries.has(k)) continue; f.queries.add(k);
+    for(const s of activeSources()) add.push({s, q, page:1, done:false, busy:false}); }
+  if(front) f.cursors.unshift(...add); else f.cursors.push(...add);
+  return add.length;
+}
+
+// ---------- query expansion: translate non-English topics, then branch into related terms ----------
+const AUTO_MODS = ["interior","equipment","abandoned","dark","old","detail","architecture","concept art","night","close up","vintage","room","exterior","texture"];
+const jget = (u, ms=6000) => { const c = new AbortController(); const t = setTimeout(() => c.abort(), ms);
+  return fetch(u, {signal:c.signal}).then(r => r.ok ? r.json() : null).catch(() => null).finally(() => clearTimeout(t)); };
+
+async function translateWord(w){
+  // Wikidata knows labels in every language; look the word up as Dutch/German/French/Spanish and take the English label
+  const base = `https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&origin=*&limit=3&uselang=en&search=${encodeURIComponent(w)}&language=`;
+  const en = await jget(base + "en");
+  if(en && (en.search||[]).some(x => (x.match||{}).text && x.match.text.toLowerCase() === w && x.match.language === "en")) return w;
+  for(const lang of ["nl","de","fr","es"]){
+    const j = await jget(base + lang);
+    const hit = j && (j.search||[]).find(x => (x.match||{}).text && x.match.text.toLowerCase() === w && x.display && x.display.label && x.display.label.language === "en");
+    if(hit) return hit.display.label.value.toLowerCase();
+  }
+  return w;
+}
+async function expand(f){
+  const words = f.topic.toLowerCase().split(/\s+/).filter(Boolean);
+  const en = (await Promise.all(words.map(translateWord))).join(" ");
+  if(f.dead) return;
+  if(en !== f.topic.toLowerCase()){
+    addQueries(f, [en, ...settings.mods.map(m => `${en} ${m}`)], true);
+    f.translated = en; toast(`Also searching in English: ${en}`); pump();
+  }
+  // related words from Datamuse: "means like" and "triggered by" (laboratory -> chemistry, microscope, experiment…)
+  const [ml, trg] = await Promise.all([
+    jget(`https://api.datamuse.com/words?ml=${encodeURIComponent(en)}&max=12`),
+    jget(`https://api.datamuse.com/words?rel_trg=${encodeURIComponent(en.split(" ").pop())}&max=12`)]);
+  if(f.dead) return;
+  const rel = [];
+  for(const x of (ml||[])) if(!x.word.includes(en)) rel.push(x.word);
+  for(const x of (trg||[])) rel.push(`${en} ${x.word}`);
+  const mods = AUTO_MODS.filter(m => !settings.mods.includes(m)).map(m => `${en} ${m}`);
+  // interleave so variety shows up early
+  while(rel.length || mods.length){ if(mods.length) f.extra.push(mods.shift()); if(rel.length) f.extra.push(rel.shift()); if(rel.length) f.extra.push(rel.shift()); }
+  pump();
 }
 
 function ensureColl(topic){
@@ -242,7 +290,9 @@ function ensureColl(topic){
 
 async function pump(){
   const f = feed; if(!f || f.dead) return;
-  // 1. metadata
+  // 1. metadata; widen the search with related queries before the current ones run dry
+  if(f.pending.length < FETCH_BELOW && f.extra.length && f.cursors.filter(c => !c.done).length < 2 * activeSources().length)
+    addQueries(f, f.extra.splice(0, 2));
   const live = f.cursors.filter(c => !c.done);
   if(f.pending.length < FETCH_BELOW && live.length){
     const parallel = Math.min(3, live.length);
@@ -271,7 +321,7 @@ async function pump(){
     (img.decode ? img.decode() : new Promise((res, rej) => { img.onload = res; img.onerror = rej; }))
       .then(() => done(img.naturalWidth > 80)).catch(() => done(false));
   }
-  if(!f.ready.length && !f.loading && !f.pending.length && f.cursors.every(c => c.done)) render();
+  if(!f.ready.length && !f.loading && !f.pending.length && !f.extra.length && !f.expanding && f.cursors.every(c => c.done)) render();
 }
 function shuffleTail(arr, n){ // light shuffle of the newly added batch so sources interleave
   for(let i = arr.length-1; i > Math.max(0, arr.length-n); i--){ const j = arr.length - n + Math.floor(Math.random()*n); [arr[i], arr[j]] = [arr[j], arr[i]]; }
@@ -300,7 +350,7 @@ function render(){
   if(!cur){
     stage.querySelectorAll(".card").forEach(c => c.remove()); topCard = null;
     empty.hidden = false;
-    const exhausted = !f.loading && !f.pending.length && f.cursors.every(c => c.done);
+    const exhausted = !f.loading && !f.pending.length && !f.extra.length && !f.expanding && f.cursors.every(c => c.done);
     empty.querySelector(".spinner").hidden = exhausted;
     document.getElementById("emptyText").textContent = exhausted
       ? (f.errors && !f.coll.seen.length ? "Couldn't reach the image sources. Check your connection." : "No more pictures for this topic. Try a variation or a new topic.")
