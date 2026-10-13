@@ -14,6 +14,8 @@
 <link rel="preconnect" href="https://www.wikidata.org">
 <link rel="preconnect" href="https://api.datamuse.com">
 <link rel="preconnect" href="https://pixabay.com">
+<link rel="preconnect" href="https://api.rawg.io">
+<link rel="preconnect" href="https://media.rawg.io">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one full-height stage, card stack in the middle, thumb-reach controls at the bottom */
@@ -119,11 +121,12 @@ label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--mute
     <h2>Your collections</h2>
     <div class="list" id="collList"></div>
     <details>
-      <summary>Better photos: add a free Pixabay, Pexels or Unsplash key</summary>
+      <summary>Better photos and game screenshots: add free keys</summary>
       <div class="list" style="margin-top:12px">
-        <p class="note">Openverse and Wikimedia work with no key. A free key from pixabay.com/api/docs, pexels.com/api or unsplash.com/developers adds millions of high-quality photos. Keys stay on this phone.</p>
+        <p class="note">Openverse and Wikimedia work with no key. A free key from pixabay.com/api/docs, pexels.com/api or unsplash.com/developers adds millions of high-quality photos. A free RAWG key (rawg.io/apidocs) adds in-game screenshots from games that match your topic. Keys stay on this phone.</p>
         <label>Pexels API key<input id="pexelsKey" autocomplete="off"></label>
         <label>Pixabay API key<input id="pixabayKey" autocomplete="off"></label>
+        <label>RAWG key (game screenshots)<input id="rawgKey" autocomplete="off"></label>
         <label>Unsplash access key<input id="unsplashKey" autocomplete="off"></label>
         <button class="secondary" type="button" id="saveKeys">Save keys</button>
       </div>
@@ -160,7 +163,7 @@ const LS = {
 };
 const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "topic";
 let collections = LS.get("as.collections", {}); // slug -> {topic, created, kept:[item], skipped:[id], seen:[id]}
-let settings = LS.get("as.settings", {sources:{openverse:true, wikimedia:true, pexels:true, pixabay:true, unsplash:true}, mods:[], pexels:"", unsplash:"", topic:""});
+let settings = LS.get("as.settings", {sources:{openverse:true, wikimedia:true, pexels:true, pixabay:true, rawg:true, unsplash:true}, mods:[], pexels:"", unsplash:"", topic:""});
 const save = () => { LS.set("as.collections", collections); LS.set("as.settings", settings); };
 
 // ---------- topic variations ----------
@@ -219,6 +222,24 @@ const SOURCES = {
       const j = await r.json();
       return (j.hits||[]).map(x => ({ id: "pb_" + x.id, source: "pixabay", title: x.tags || "", creator: x.user || "",
         license: "Pixabay Content License", page: x.pageURL, thumb: x.webformatURL, full: x.largeImageURL || x.webformatURL, w: x.imageWidth, h: x.imageHeight }));
+    }
+  },
+  rawg: {
+    label: "Game screenshots", needsKey: "rawg",
+    async fetch(q, page){
+      // RAWG matches game titles and descriptions; each game carries a handful of in-game screenshots
+      const r = await fetch(`https://api.rawg.io/api/games?key=${encodeURIComponent(settings.rawg)}&search=${encodeURIComponent(q)}&page_size=20&page=${page}`);
+      if(r.status === 404) return [];
+      if(!r.ok) throw new Error("rawg " + r.status);
+      const j = await r.json();
+      const small = u => u.replace("/media/games/", "/media/resize/640/-/games/").replace("/media/screenshots/", "/media/resize/640/-/screenshots/");
+      const out = [];
+      for(const g of (j.results||[])) for(const sh of (g.short_screenshots||[])){
+        if(!sh.image) continue;
+        out.push({ id: "rg_" + g.id + "_" + sh.id, source: "rawg", title: g.name || "", creator: "",
+          license: "Game screenshot (reference only)", page: `https://rawg.io/games/${g.slug}`, thumb: small(sh.image), full: sh.image, w: 0, h: 0 });
+      }
+      return out;
     }
   },
   unsplash: {
@@ -473,6 +494,7 @@ function openStart(){
   document.getElementById("pexelsKey").value = settings.pexels || "";
   document.getElementById("unsplashKey").value = settings.unsplash || "";
   document.getElementById("pixabayKey").value = settings.pixabay || "";
+  document.getElementById("rawgKey").value = settings.rawg || "";
   renderCollList();
   startSheet.hidden = false;
 }
@@ -500,6 +522,8 @@ document.getElementById("saveKeys").onclick = () => {
   settings.unsplash = document.getElementById("unsplashKey").value.trim();
   settings.pixabay = document.getElementById("pixabayKey").value.trim();
   if(settings.pixabay) settings.sources.pixabay = true;
+  settings.rawg = document.getElementById("rawgKey").value.trim();
+  if(settings.rawg) settings.sources.rawg = true;
   if(settings.pexels) settings.sources.pexels = true;
   if(settings.unsplash) settings.sources.unsplash = true;
   save(); openStart(); toast("Keys saved on this phone");
