@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0e1113">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Art Swipe</title>
+<link rel="preconnect" href="https://api.openverse.org">
+<link rel="preconnect" href="https://commons.wikimedia.org">
+<link rel="preconnect" href="https://upload.wikimedia.org">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one full-height stage, card stack in the middle, thumb-reach controls at the bottom */
+:root{
+  --bg:#0e1113; --panel:#171b1e; --line:#2a3135; --fg:#e8ecea; --muted:#8a9599;
+  --keep:#5fd38d; --skip:#ef6a5a; --accent:#d9c27a;
+  --display:"Archivo Narrow","Arial Narrow",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,sans-serif;overscroll-behavior:none}
+[hidden]{display:none!important}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;width:100%}
+.app{height:100%;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top,0px) + 10px) 16px calc(env(safe-area-inset-bottom,0px) + 12px);gap:10px;max-width:640px;margin:0 auto}
+header{display:flex;align-items:center;gap:10px;min-width:0}
+.brand{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:.02em;text-transform:uppercase;white-space:nowrap}
+.topic-pill{flex:1;min-width:0;font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.icon-btn{padding:8px 10px;border:1px solid var(--line);border-radius:999px;font-family:var(--mono);font-size:12px;white-space:nowrap}
+.icon-btn b{color:var(--keep)}
+.stage{position:relative;flex:1;min-height:0}
+.card{position:absolute;inset:0;border-radius:16px;overflow:hidden;background:var(--panel);touch-action:none;user-select:none;will-change:transform}
+.card img{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;background:#000}
+.card .meta{position:absolute;left:0;right:0;bottom:0;padding:28px 14px 12px;background:linear-gradient(transparent,rgba(0,0,0,.8));font-family:var(--mono);font-size:11px;color:#cfd6d4;display:flex;justify-content:space-between;gap:8px}
+.card .meta span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stamp{position:absolute;top:22px;padding:4px 12px;border:3px solid;border-radius:8px;font-family:var(--display);font-weight:700;font-size:30px;letter-spacing:.06em;opacity:0;text-transform:uppercase}
+.stamp.keep{left:18px;color:var(--keep);transform:rotate(-12deg)}
+.stamp.skip{right:18px;color:var(--skip);transform:rotate(12deg)}
+.card.under{transform:scale(.96);filter:brightness(.6)}
+.empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;color:var(--muted);padding:20px}
+.spinner{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.controls{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center}
+.big{height:64px;border-radius:16px;font-family:var(--display);font-weight:700;font-size:20px;text-transform:uppercase;letter-spacing:.06em;border:2px solid}
+.big.skip{color:var(--skip);border-color:var(--skip)}
+.big.keep{color:var(--keep);border-color:var(--keep)}
+.big:active{transform:scale(.97)}
+.undo{width:52px;height:52px;border-radius:50%;border:1px solid var(--line);font-size:20px}
+.stats{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center}
+/* sheets */
+.sheet{position:fixed;inset:0;background:var(--bg);z-index:10;overflow-y:auto;padding:calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 24px)}
+.sheet-inner{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+.sheet h1{font-family:var(--display);font-size:34px;line-height:1;margin:8px 0 0;text-transform:uppercase;letter-spacing:.01em;text-wrap:balance}
+.sheet h2{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:8px 0 0}
+.lede{color:var(--muted);margin:0;max-width:60ch}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.chip{padding:8px 12px;border:1px solid var(--line);border-radius:999px;font-size:13px}
+.chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.primary{background:var(--accent);color:#16130a;border-radius:12px;padding:14px 18px;font-weight:700;font-family:var(--display);font-size:18px;text-transform:uppercase;letter-spacing:.06em}
+.secondary{border:1px solid var(--line);border-radius:12px;padding:12px 16px}
+.list{display:flex;flex-direction:column;gap:8px}
+.coll{display:flex;align-items:center;gap:12px;padding:10px;border:1px solid var(--line);border-radius:12px;text-align:left;width:100%}
+.coll .thumbs{display:flex;gap:2px;flex:none}
+.coll .thumbs img{width:40px;height:40px;object-fit:cover;border-radius:4px;background:var(--panel)}
+.coll .info{flex:1;min-width:0}
+.coll .name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.coll .count{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:6px}
+.grid figure{margin:0;position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--panel)}
+.grid img{width:100%;height:100%;object-fit:cover;display:block}
+.grid button{position:absolute;top:4px;right:4px;width:26px;height:26px;border-radius:50%;background:rgba(0,0,0,.65);font-size:14px;line-height:26px}
+.note{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.progress{font-family:var(--mono);font-size:13px;color:var(--accent)}
+details summary{cursor:pointer;color:var(--muted)}
+label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 100px);transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);padding:10px 16px;border-radius:999px;font-size:13px;z-index:20;max-width:90vw}
+@media (prefers-reduced-motion:reduce){.card{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">Art Swipe</div>
+    <button class="topic-pill" id="topicBtn" title="Change topic">no topic</button>
+    <button class="icon-btn" id="collBtn">Kept <b id="keptCount">0</b></button>
+  </header>
+  <div class="stage" id="stage">
+    <div class="empty" id="empty"><div class="spinner"></div><div id="emptyText">Loading pictures…</div></div>
+  </div>
+  <div class="controls">
+    <button class="big skip" id="skipBtn" aria-label="Skip">Skip</button>
+    <button class="undo" id="undoBtn" aria-label="Undo last swipe">↶</button>
+    <button class="big keep" id="keepBtn" aria-label="Keep">Keep</button>
+  </div>
+  <div class="stats" id="stats">swipe right to keep, left to skip</div>
+</div>
+
+<!-- Start / topic sheet -->
+<section class="sheet" id="startSheet" hidden>
+  <div class="sheet-inner">
+    <h1>What are we looking for?</h1>
+    <p class="lede">Type a topic. You get a fast stream of real photos. Swipe right to keep, left to skip. Every topic becomes its own inspiration folder you can export.</p>
+    <form id="topicForm" class="list">
+      <input id="topicInput" placeholder="e.g. abandoned hospital corridor" autocomplete="off" enterkeyhint="go">
+      <h2>Mix in variations</h2>
+      <div class="row" id="modChips"></div>
+      <h2>Sources</h2>
+      <div class="row" id="srcChips"></div>
+      <button class="primary" type="submit">Start swiping</button>
+    </form>
+    <h2>Your collections</h2>
+    <div class="list" id="collList"></div>
+    <details>
+      <summary>Better photos: add a free Pexels or Unsplash key</summary>
+      <div class="list" style="margin-top:12px">
+        <p class="note">Openverse and Wikimedia work with no key. A free key from pexels.com/api or unsplash.com/developers adds high-quality photography. Keys stay on this phone.</p>
+        <label>Pexels API key<input id="pexelsKey" autocomplete="off"></label>
+        <label>Unsplash access key<input id="unsplashKey" autocomplete="off"></label>
+        <button class="secondary" type="button" id="saveKeys">Save keys</button>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- Collection sheet -->
+<section class="sheet" id="collSheet" hidden>
+  <div class="sheet-inner">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <button class="secondary" id="collBack">← Back to swiping</button>
+    </div>
+    <h1 id="collTitle">Collection</h1>
+    <div class="note" id="collNote"></div>
+    <div class="row">
+      <button class="primary" id="exportBtn">Export folder (.zip)</button>
+      <button class="secondary" id="copyBtn">Copy manifest</button>
+    </div>
+    <div class="progress" id="exportProgress" hidden></div>
+    <div class="grid" id="collGrid"></div>
+  </div>
+</section>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+"use strict";
+// ---------- storage ----------
+const LS = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch{ return d; } },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} }
+};
+const slug = s => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "topic";
+let collections = LS.get("as.collections", {}); // slug -> {topic, created, kept:[item], skipped:[id], seen:[id]}
+let settings = LS.get("as.settings", {sources:{openverse:true, wikimedia:true, pexels:true, unsplash:true}, mods:[], pexels:"", unsplash:"", topic:""});
+const save = () => { LS.set("as.collections", collections); LS.set("as.settings", settings); };
+
+// ---------- topic variations ----------
+const MODS = ["interior","exterior","abandoned","dark","detail","concept art","architecture","texture","night","vintage"];
+
+// ---------- sources ----------
+// Every source returns normalized items: {id, source, title, creator, license, page, thumb, full, w, h}
+const SOURCES = {
+  openverse: {
+    label: "Openverse", needsKey: false,
+    async fetch(q, page){
+      const u = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page=${page}&page_size=20&mature=false`;
+      const r = await fetch(u); if(!r.ok) throw new Error("openverse " + r.status);
+      const j = await r.json();
+      return (j.results||[]).map(x => ({
+        id: "ov_" + x.id, source: "openverse", title: x.title || "", creator: x.creator || "",
+        license: (x.license||"") + (x.license_version ? " " + x.license_version : ""),
+        page: x.foreign_landing_url || "", thumb: x.thumbnail || x.url, full: x.url, w: x.width, h: x.height
+      }));
+    }
+  },
+  wikimedia: {
+    label: "Wikimedia", needsKey: false,
+    async fetch(q, page){
+      const off = (page-1)*25;
+      const u = `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=25&gsroffset=${off}&gsrsearch=${encodeURIComponent(q + " filetype:bitmap")}&prop=imageinfo&iiprop=url|size|mime|extmetadata&iiurlwidth=900`;
+      const r = await fetch(u); if(!r.ok) throw new Error("wikimedia " + r.status);
+      const j = await r.json();
+      const pages = Object.values((j.query||{}).pages||{}).sort((a,b)=>(a.index||0)-(b.index||0));
+      return pages.map(p => {
+        const ii = (p.imageinfo||[])[0]; if(!ii || !/jpe?g|png|webp/.test(ii.mime||"")) return null;
+        const md = ii.extmetadata || {};
+        const strip = s => (s||"").replace(/<[^>]*>/g, "").trim();
+        return { id: "wm_" + p.pageid, source: "wikimedia", title: (p.title||"").replace(/^File:/,"").replace(/\.[a-z]+$/i,""),
+          creator: strip(md.Artist && md.Artist.value).slice(0,80), license: strip(md.LicenseShortName && md.LicenseShortName.value),
+          page: ii.descriptionurl || "", thumb: ii.thumburl || ii.url, full: ii.url, w: ii.width, h: ii.height };
+      }).filter(Boolean);
+    }
+  },
+  pexels: {
+    label: "Pexels", needsKey: "pexels",
+    async fetch(q, page){
+      const r = await fetch(`https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&per_page=30&page=${page}`, {headers:{Authorization: settings.pexels}});
+      if(!r.ok) throw new Error("pexels " + r.status);
+      const j = await r.json();
+      return (j.photos||[]).map(x => ({ id: "px_" + x.id, source: "pexels", title: x.alt || "", creator: x.photographer || "",
+        license: "Pexels License", page: x.url, thumb: x.src.large, full: x.src.large2x || x.src.original, w: x.width, h: x.height }));
+    }
+  },
+  unsplash: {
+    label: "Unsplash", needsKey: "unsplash",
+    async fetch(q, page){
+      const r = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(q)}&per_page=30&page=${page}&client_id=${encodeURIComponent(settings.unsplash)}`);
+      if(!r.ok) throw new Error("unsplash " + r.status);
+      const j = await r.json();
+      return (j.results||[]).map(x => ({ id: "us_" + x.id, source: "unsplash", title: x.alt_description || x.description || "", creator: (x.user||{}).name || "",
+        license: "Unsplash License", page: (x.links||{}).html || "", thumb: x.urls.regular, full: x.urls.full || x.urls.regular, w: x.width, h: x.height }));
+    }
+  }
+};
+const activeSources = () => Object.keys(SOURCES).filter(k => settings.sources[k] && (!SOURCES[k].needsKey || settings[SOURCES[k].needsKey]));
+
+// ---------- feed engine: keeps a buffer of fully decoded images ahead of the user ----------
+const AHEAD = 12;        // decoded images ready to show
+const FETCH_BELOW = 30;  // fetch more metadata when the pending list drops under this
+let feed = null;
+
+function makeFeed(topic){
+  const coll = ensureColl(topic);
+  const seen = new Set([...coll.seen]);
+  const queries = [topic, ...settings.mods.map(m => `${topic} ${m}`)];
+  // one cursor per (source, query); round-robin across them
+  const cursors = [];
+  for(const s of activeSources()) for(const q of queries) cursors.push({s, q, page:1, done:false, busy:false});
+  return { topic, coll, seen, cursors, ci:0, pending:[], ready:[], loading:0, dead:false, errors:0 };
+}
+
+function ensureColl(topic){
+  const k = slug(topic);
+  if(!collections[k]) collections[k] = {topic, created: new Date().toISOString(), kept:[], skipped:[], seen:[]};
+  return collections[k];
+}
+
+async function pump(){
+  const f = feed; if(!f || f.dead) return;
+  // 1. metadata
+  const live = f.cursors.filter(c => !c.done);
+  if(f.pending.length < FETCH_BELOW && live.length){
+    const parallel = Math.min(3, live.length);
+    const jobs = [];
+    for(let n=0; n<parallel; n++){
+      const c = live[(f.ci++) % live.length];
+      if(c.busy) continue;
+      c.busy = true;
+      jobs.push(SOURCES[c.s].fetch(c.q, c.page).then(items => {
+        c.page++; if(!items.length) c.done = true;
+        for(const it of items){ if(!f.seen.has(it.id) && !f.seen.has(it.full)){ f.seen.add(it.id); f.seen.add(it.full); f.pending.push(it); } }
+        shuffleTail(f.pending, items.length);
+      }).catch(e => { c.done = true; f.errors++; console.warn(e); }).finally(() => { c.busy = false; }));
+    }
+    if(jobs.length) Promise.all(jobs).then(() => { if(feed === f) pump(); });
+  }
+  // 2. decode images ahead
+  while(f.ready.length + f.loading < AHEAD && f.pending.length){
+    const it = f.pending.shift();
+    f.loading++;
+    const img = new Image();
+    img.decoding = "async";
+    img.referrerPolicy = "no-referrer";
+    img.src = it.thumb;
+    const done = ok => { f.loading--; if(feed !== f) return; if(ok){ it._img = img; f.ready.push(it); render(); } pump(); };
+    (img.decode ? img.decode() : new Promise((res, rej) => { img.onload = res; img.onerror = rej; }))
+      .then(() => done(img.naturalWidth > 80)).catch(() => done(false));
+  }
+  if(!f.ready.length && !f.loading && !f.pending.length && f.cursors.every(c => c.done)) render();
+}
+function shuffleTail(arr, n){ // light shuffle of the newly added batch so sources interleave
+  for(let i = arr.length-1; i > Math.max(0, arr.length-n); i--){ const j = arr.length - n + Math.floor(Math.random()*n); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+}
+
+// ---------- rendering the card stack ----------
+const stage = document.getElementById("stage");
+const empty = document.getElementById("empty");
+let topCard = null, history = [];
+
+function cardEl(it){
+  const el = document.createElement("div");
+  el.className = "card";
+  el.appendChild(it._img);
+  el.insertAdjacentHTML("beforeend", `<div class="stamp keep">Keep</div><div class="stamp skip">Skip</div><div class="meta"><span></span><span></span></div>`);
+  const spans = el.querySelectorAll(".meta span");
+  spans[0].textContent = it.title || "untitled";
+  spans[1].textContent = SOURCES[it.source].label;
+  return el;
+}
+
+function render(){
+  const f = feed; if(!f) return;
+  updateCounts();
+  const cur = f.ready[0], next = f.ready[1];
+  if(!cur){
+    stage.querySelectorAll(".card").forEach(c => c.remove()); topCard = null;
+    empty.hidden = false;
+    const exhausted = !f.loading && !f.pending.length && f.cursors.every(c => c.done);
+    empty.querySelector(".spinner").hidden = exhausted;
+    document.getElementById("emptyText").textContent = exhausted
+      ? (f.errors && !f.coll.seen.length ? "Couldn't reach the image sources. Check your connection." : "No more pictures for this topic. Try a variation or a new topic.")
+      : "Loading pictures…";
+    return;
+  }
+  empty.hidden = true;
+  if(topCard && topCard._item === cur) { ensureUnder(next); return; }
+  stage.querySelectorAll(".card").forEach(c => c.remove());
+  topCard = null;
+  ensureUnder(next);
+  topCard = cardEl(cur); topCard._item = cur;
+  stage.appendChild(topCard);
+  bindDrag(topCard);
+}
+function ensureUnder(next){
+  const old = stage.querySelector(".card.under");
+  if(old && old._item === next) return;
+  if(old) old.remove();
+  if(!next) return;
+  const u = cardEl(next); u._item = next; u.classList.add("under");
+  if(topCard && topCard.parentNode === stage) stage.insertBefore(u, topCard); else stage.appendChild(u);
+}
+
+function bindDrag(el){
+  let sx=0, sy=0, dx=0, dy=0, dragging=false;
+  const keep = el.querySelector(".stamp.keep"), skip = el.querySelector(".stamp.skip");
+  el.addEventListener("pointerdown", e => { dragging=true; sx=e.clientX; sy=e.clientY; el.setPointerCapture(e.pointerId); el.style.transition="none"; });
+  el.addEventListener("pointermove", e => {
+    if(!dragging) return;
+    dx = e.clientX - sx; dy = e.clientY - sy;
+    el.style.transform = `translate(${dx}px,${dy*0.3}px) rotate(${dx/18}deg)`;
+    keep.style.opacity = Math.max(0, Math.min(1, dx/90));
+    skip.style.opacity = Math.max(0, Math.min(1, -dx/90));
+  });
+  const end = () => {
+    if(!dragging) return; dragging=false;
+    const thresh = Math.min(110, stage.clientWidth * 0.25);
+    if(dx > thresh) decide(true); else if(dx < -thresh) decide(false);
+    else { el.style.transition="transform .2s"; el.style.transform=""; keep.style.opacity=0; skip.style.opacity=0; }
+    dx = dy = 0;
+  };
+  el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+}
+
+function decide(isKeep){
+  const f = feed; if(!f || !f.ready.length) return;
+  const it = f.ready.shift();
+  const el = topCard; topCard = null;
+  if(el){
+    el.style.transition = "transform .22s ease-out, opacity .22s";
+    el.style.transform = `translate(${isKeep?120:-120}vw,0) rotate(${isKeep?25:-25}deg)`;
+    el.querySelector(isKeep?".stamp.keep":".stamp.skip").style.opacity = 1;
+    setTimeout(() => el.remove(), 230);
+    const u = stage.querySelector(".card.under"); if(u) u.classList.remove("under");
+    if(u){ topCard = u; bindDrag(u); }
+  }
+  const rec = strip(it);
+  f.coll.seen.push(it.id);
+  if(isKeep) f.coll.kept.push(rec); else f.coll.skipped.push(rec);
+  history.push({it, isKeep});
+  if(history.length > 30) history.shift();
+  save();
+  if(navigator.vibrate) try{ navigator.vibrate(isKeep ? 12 : 6); }catch{}
+  render(); pump();
+}
+function strip(it){ const {_img, ...r} = it; r.at = new Date().toISOString(); return r; }
+
+function undo(){
+  const f = feed; const h = history.pop(); if(!f || !h) return;
+  const list = h.isKeep ? f.coll.kept : f.coll.skipped;
+  const i = list.map(x => x.id).lastIndexOf(h.it.id); if(i >= 0) list.splice(i, 1);
+  const s = f.coll.seen.lastIndexOf(h.it.id); if(s >= 0) f.coll.seen.splice(s, 1);
+  save();
+  f.ready.unshift(h.it); topCard = null; render();
+}
+
+function updateCounts(){
+  const c = feed && feed.coll;
+  document.getElementById("keptCount").textContent = c ? c.kept.length : 0;
+  document.getElementById("topicBtn").textContent = c ? c.topic : "no topic";
+  document.getElementById("stats").textContent = c ? `${c.kept.length} kept · ${c.skipped.length} skipped · ${feed.ready.length} ready` : "";
+}
+
+// ---------- topic sheet ----------
+const startSheet = document.getElementById("startSheet");
+function openStart(){
+  document.getElementById("topicInput").value = settings.topic || "";
+  const mc = document.getElementById("modChips"); mc.innerHTML = "";
+  for(const m of MODS){
+    const b = document.createElement("button"); b.type="button"; b.className="chip"; b.textContent=m;
+    b.setAttribute("aria-pressed", settings.mods.includes(m));
+    b.onclick = () => { const on = b.getAttribute("aria-pressed") !== "true"; b.setAttribute("aria-pressed", on);
+      settings.mods = on ? [...settings.mods, m] : settings.mods.filter(x => x !== m); save(); };
+    mc.appendChild(b);
+  }
+  const sc = document.getElementById("srcChips"); sc.innerHTML = "";
+  for(const [k, s] of Object.entries(SOURCES)){
+    const b = document.createElement("button"); b.type="button"; b.className="chip";
+    const locked = s.needsKey && !settings[s.needsKey];
+    b.textContent = s.label + (locked ? " (needs key)" : "");
+    b.disabled = locked; if(locked) b.style.opacity = .45;
+    b.setAttribute("aria-pressed", !locked && !!settings.sources[k]);
+    b.onclick = () => { settings.sources[k] = !settings.sources[k]; b.setAttribute("aria-pressed", settings.sources[k]); save(); };
+    sc.appendChild(b);
+  }
+  document.getElementById("pexelsKey").value = settings.pexels || "";
+  document.getElementById("unsplashKey").value = settings.unsplash || "";
+  renderCollList();
+  startSheet.hidden = false;
+}
+function renderCollList(){
+  const el = document.getElementById("collList"); el.innerHTML = "";
+  const all = Object.entries(collections).sort((a,b) => (b[1].kept.length - a[1].kept.length));
+  if(!all.length){ el.innerHTML = `<p class="note">None yet. Your first topic creates one.</p>`; return; }
+  for(const [k, c] of all){
+    const b = document.createElement("button"); b.className = "coll";
+    b.innerHTML = `<div class="thumbs"></div><div class="info"><div class="name"></div><div class="count"></div></div><span class="note">open</span>`;
+    b.querySelector(".name").textContent = c.topic;
+    b.querySelector(".count").textContent = `${c.kept.length} kept · ${c.skipped.length} skipped`;
+    for(const it of c.kept.slice(-3)){ const i = new Image(); i.src = it.thumb; i.referrerPolicy="no-referrer"; i.loading="lazy"; b.querySelector(".thumbs").appendChild(i); }
+    b.onclick = () => { startTopic(c.topic); openColl(); };
+    el.appendChild(b);
+  }
+}
+document.getElementById("topicForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const t = document.getElementById("topicInput").value.trim(); if(!t) return;
+  startTopic(t); startSheet.hidden = true;
+});
+document.getElementById("saveKeys").onclick = () => {
+  settings.pexels = document.getElementById("pexelsKey").value.trim();
+  settings.unsplash = document.getElementById("unsplashKey").value.trim();
+  if(settings.pexels) settings.sources.pexels = true;
+  if(settings.unsplash) settings.sources.unsplash = true;
+  save(); openStart(); toast("Keys saved on this phone");
+};
+document.getElementById("topicBtn").onclick = openStart;
+
+function startTopic(t){
+  settings.topic = t; save();
+  if(feed) feed.dead = true;
+  history = []; topCard = null;
+  stage.querySelectorAll(".card").forEach(c => c.remove());
+  feed = makeFeed(t);
+  render(); pump();
+}
+
+// ---------- collection sheet + export ----------
+const collSheet = document.getElementById("collSheet");
+function openColl(){
+  const c = feed && feed.coll; if(!c) return;
+  document.getElementById("collTitle").textContent = c.topic;
+  document.getElementById("collNote").textContent = `${c.kept.length} kept · ${c.skipped.length} skipped · started ${c.created.slice(0,10)}`;
+  const g = document.getElementById("collGrid"); g.innerHTML = "";
+  [...c.kept].reverse().forEach(it => {
+    const fig = document.createElement("figure");
+    const img = new Image(); img.src = it.thumb; img.loading = "lazy"; img.referrerPolicy = "no-referrer"; img.alt = it.title;
+    const x = document.createElement("button"); x.textContent = "×"; x.setAttribute("aria-label","Remove");
+    x.onclick = () => { c.kept = c.kept.filter(k => k.id !== it.id); c.skipped.push(it); save(); openColl(); updateCounts(); };
+    fig.append(img, x); g.appendChild(fig);
+  });
+  document.getElementById("exportProgress").hidden = true;
+  collSheet.hidden = false;
+}
+document.getElementById("collBtn").onclick = openColl;
+document.getElementById("collBack").onclick = () => { collSheet.hidden = true; };
+
+function manifest(c){
+  return {
+    format: "art-swipe/1",
+    topic: c.topic, slug: slug(c.topic), exported: new Date().toISOString(),
+    counts: {kept: c.kept.length, skipped: c.skipped.length},
+    kept: c.kept.map((it, i) => ({ file: fileName(it, i), title: it.title, creator: it.creator, license: it.license,
+      source: it.source, page_url: it.page, image_url: it.full, thumb_url: it.thumb, width: it.w, height: it.h })),
+    // rejected images are useful as negative examples for a generator
+    skipped: c.skipped.map(it => ({ title: it.title, source: it.source, image_url: it.full, thumb_url: it.thumb }))
+  };
+}
+function fileName(it, i){ return `images/${String(i+1).padStart(3,"0")}_${it.source}_${slug(it.title).slice(0,40) || it.id}.jpg`; }
+
+async function grab(url){
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+  try{ const r = await fetch(url, {signal: ctl.signal, referrerPolicy: "no-referrer"}); if(!r.ok) throw 0; return await r.blob(); }
+  finally{ clearTimeout(t); }
+}
+
+document.getElementById("exportBtn").onclick = async () => {
+  const c = feed && feed.coll; if(!c || !c.kept.length){ toast("Keep some pictures first"); return; }
+  if(!window.JSZip){ toast("Zip tool didn't load. Use Copy manifest instead."); return; }
+  const p = document.getElementById("exportProgress"); p.hidden = false;
+  const zip = new JSZip(); const root = zip.folder(slug(c.topic));
+  const m = manifest(c); let done = 0, failed = 0;
+  const work = c.kept.map((it, i) => async () => {
+    let blob = null;
+    // prefer a big-but-sane version; fall back to the thumbnail we already displayed
+    for(const u of [it.source === "wikimedia" ? it.thumb.replace(/\/\d+px-/, "/1600px-") : it.full, it.thumb]){
+      try{ blob = await grab(u); if(blob && blob.size > 2000) break; }catch{ blob = null; }
+    }
+    if(blob) root.file(fileName(it, i), blob); else { failed++; m.kept[i].file = null; }
+    p.textContent = `Downloading ${++done}/${c.kept.length}…`;
+  });
+  for(let i = 0; i < work.length; i += 4) await Promise.all(work.slice(i, i+4).map(f => f()));
+  root.file("manifest.json", JSON.stringify(m, null, 2));
+  root.file("README.md", `# ${c.topic}\n\nArt direction reference set from Art Swipe.\n\n- Kept: ${c.kept.length}\n- Skipped: ${c.skipped.length}\n- Exported: ${m.exported}\n\n\`images/\` holds the kept pictures. \`manifest.json\` lists each file with its source page, creator and license, plus the skipped pictures as negative examples.\n\nCheck each image's license before using it in shipped work. These are references for style, not assets.\n`);
+  p.textContent = "Zipping…";
+  const out = await zip.generateAsync({type:"blob"});
+  const name = `${slug(c.topic)}-inspiration.zip`;
+  const file = new File([out], name, {type:"application/zip"});
+  p.textContent = `Done: ${c.kept.length - failed} images` + (failed ? `, ${failed} couldn't download (listed in manifest)` : "");
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file], title:name}); return; }catch(e){ if(e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(out); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+};
+document.getElementById("copyBtn").onclick = async () => {
+  const c = feed && feed.coll; if(!c) return;
+  const txt = JSON.stringify(manifest(c), null, 2);
+  try{ await navigator.clipboard.writeText(txt); toast("Manifest copied"); }
+  catch{ toast("Copy failed on this browser"); }
+};
+
+// ---------- misc ----------
+let toastT;
+function toast(msg){ const t = document.getElementById("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 2200); }
+document.getElementById("keepBtn").onclick = () => decide(true);
+document.getElementById("skipBtn").onclick = () => decide(false);
+document.getElementById("undoBtn").onclick = undo;
+document.addEventListener("keydown", e => {
+  if(!startSheet.hidden || !collSheet.hidden) return;
+  if(e.key === "ArrowRight") decide(true); else if(e.key === "ArrowLeft") decide(false); else if(e.key === "Backspace" || e.key === "z") undo();
+});
+
+if(settings.topic){ startTopic(settings.topic); } else { openStart(); }
+</script>
+</body>
+</html>
